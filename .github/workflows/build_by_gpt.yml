@@ -1,0 +1,76 @@
+name: Build PVE Kernel (Debian Container + Auto Deps)
+
+on:
+  schedule:
+    - cron: "0 2 * * *"   # 每天 10:00 CST 运行
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: debian:bookworm   # 使用 Debian Bookworm 容器环境
+    steps:
+      - name: Install base tools
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            git gnupg curl devscripts equivs fakeroot
+
+      - name: Checkout this repo
+        uses: actions/checkout@v4
+
+      - name: Clone Proxmox kernel repo
+        run: |
+          git clone https://git.proxmox.com/git/pve-kernel.git
+          cd pve-kernel
+          LATEST_COMMIT_MSG=$(git log -1 --pretty=%B)
+          echo "LATEST_COMMIT_MSG=$LATEST_COMMIT_MSG" >> $GITHUB_ENV
+
+      - name: Check for bump version
+        if: "!contains(env.LATEST_COMMIT_MSG, 'bump version')"
+        run: |
+          echo "No bump version commit found, exiting."
+          exit 0
+
+      - name: Extract kernel version
+        run: |
+          cd pve-kernel
+          VERSION=$(head -n1 debian/changelog | awk '{print $2}' | sed 's/[()]//g')
+          echo "KERNEL_VERSION=$VERSION" >> $GITHUB_ENV
+          echo "Detected kernel version: $VERSION"
+
+      - name: Install build dependencies
+        run: |
+          cd pve-kernel
+          mk-build-deps -i debian/control -t "apt-get -y --no-install-recommends"
+
+      - name: Check if release exists
+        id: check_release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "pve-kernel-${KERNEL_VERSION}" >/dev/null 2>&1; then
+            echo "already_exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "already_exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Skip if already released
+        if: steps.check_release.outputs.already_exists == 'true'
+        run: |
+          echo "Release already exists, skipping build."
+          exit 0
+
+      - name: Build kernel
+        run: |
+          cd pve-kernel
+          make deb
+
+      - name: Create Release and Upload
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "pve-kernel-${KERNEL_VERSION}" ./pve-kernel/*.deb \
+            --title "PVE Kernel ${KERNEL_VERSION}" \
+            --notes "Automatically built PVE kernel ${KERNEL_VERSION}"
