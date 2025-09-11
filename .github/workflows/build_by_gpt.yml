@@ -13,7 +13,7 @@ jobs:
       - name: Checkout this repo
         uses: actions/checkout@v4
 
-      - name: Install base build tools
+      - name: Install build dependencies
         run: |
           sudo apt-get update
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
@@ -28,7 +28,11 @@ jobs:
             git \
             wget \
             sudo \
-            lsb-release
+            lsb-release \
+            debhelper \
+            dh-autoreconf \
+            dh-python \
+            python3-sphinx
 
       - name: Clone Proxmox kernel repository
         run: |
