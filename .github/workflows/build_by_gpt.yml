@@ -43,12 +43,22 @@ jobs:
 
       - name: Install build dependencies
         run: |
-          # 启用 deb-src 源
-          sed -i 's/^# deb-src/deb-src/' /etc/apt/sources.list
+          # 写入完整的 sources.list，启用 deb-src
+          cat > /etc/apt/sources.list <<EOF
+          deb http://deb.debian.org/debian bookworm main contrib non-free non-free-firmware
+          deb-src http://deb.debian.org/debian bookworm main contrib non-free non-free-firmware
+
+          deb http://deb.debian.org/debian bookworm-updates main contrib non-free non-free-firmware
+          deb-src http://deb.debian.org/debian bookworm-updates main contrib non-free non-free-firmware
+
+          deb http://security.debian.org/debian-security bookworm-security main contrib non-free non-free-firmware
+          deb-src http://security.debian.org/debian-security bookworm-security main contrib non-free non-free-firmware
+          EOF
+
           apt-get update
           cd pve-kernel
-          # 自动安装构建依赖
           mk-build-deps -i debian/control -t "apt-get -y --no-install-recommends"
+
 
       - name: Check if release exists
         id: check_release
