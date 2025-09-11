@@ -89,14 +89,15 @@ jobs:
 
       - name: Add Proxmox VE repository for dependencies
         run: |
-          # 添加 Proxmox VE 的 GPG 密钥 (使用企业版或社区版源，这里以社区版为例，PVE 8.x)
-          wget http://download.proxmox.com/debian/proxmox-release-${{ env.PROXMOX_DEBIAN_RELEASE }}.gpg -O /etc/apt/trusted.gpg.d/proxmox-release-${{ env.PROXMOX_DEBIAN_RELEASE }}.gpg
-          # 添加 Proxmox VE 软件源 (使用 no-subscription 仓库)
-          echo "deb http://download.proxmox.com/debian/pve ${{ env.PROXMOX_DEBIAN_RELEASE }} pve-no-subscription" > /etc/apt/sources.list.d/pve.list
-          # 更新软件包列表，使新添加的源生效
-          apt-get update
-        # 注意：这些操作需要 sudo 权限，但 GitHub Actions 的 Ubuntu 环境默认以 root 用户运行，所以省略了 sudo
+          # 使用 sudo 下载并保存 GPG 密钥到受信任的目录
+          sudo wget http://download.proxmox.com/debian/proxmox-release-trixie.gpg -O /etc/apt/trusted.gpg.d/proxmox-release-trixie.gpg
 
+          # 使用 sudo 添加 Proxmox VE 软件源
+          echo "deb http://download.proxmox.com/debian/pve trixie pve-no-subscription" | sudo tee /etc/apt/sources.list.d/pve.list
+
+          # 使用 sudo 更新软件包列表
+          sudo apt-get update
+        
       - name: Install essential and PVE build dependencies (Ubuntu)
         run: |
           # 更新基础包列表并安装基础编译工具
