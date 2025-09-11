@@ -76,10 +76,12 @@ jobs:
           echo "Release already exists. Skipping build."
           exit 0
 
-      - name: Build kernel using Proxmox build script
+      - name: Build PVE kernel
         run: |
           cd pve-kernel
-          sudo ./build.sh
+          make build-dir-fresh
+          make deb
+
 
       - name: Create GitHub release and upload kernel
         run: |
