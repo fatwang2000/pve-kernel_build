@@ -24,7 +24,8 @@ jobs:
         run: |
           git clone https://git.proxmox.com/git/pve-kernel.git
           cd pve-kernel
-          LATEST_COMMIT_MSG=$(git log -1 --pretty=%B)
+          # 只取 commit 标题，避免换行和特殊字符
+          LATEST_COMMIT_MSG=$(git log -1 --pretty=%s)
           echo "LATEST_COMMIT_MSG=$LATEST_COMMIT_MSG" >> $GITHUB_ENV
 
       - name: Check for bump version
