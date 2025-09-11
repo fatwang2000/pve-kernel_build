@@ -1,0 +1,93 @@
+name: Build Proxmox pve-kernel on version bump
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # Run daily at midnight UTC
+  workflow_dispatch:  # Allow manual trigger
+
+permissions:
+  contents: write  # Needed for creating releases
+
+jobs:
+  check-and-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install GitHub CLI
+        run: |
+          sudo apt-key adv --keyserver keyserver.ubuntu.com --recv-keys C99B11DEB97541F0
+          sudo apt-add-repository https://cli.github.com/packages
+          sudo apt update
+          sudo apt install -y gh
+
+      - name: Set up Proxmox repository
+        run: |
+          sudo apt update
+          sudo apt install -y wget gnupg software-properties-common devscripts
+          wget https://enterprise.proxmox.com/debian/proxmox-release-bookworm.gpg -O /etc/apt/trusted.gpg.d/proxmox-release-bookworm.gpg
+          echo "deb http://download.proxmox.com/debian/pve bookworm pve-no-subscription" | sudo tee /etc/apt/sources.list.d/pve.list
+          sudo apt update
+
+      - name: Clone pve-kernel repository
+        run: git clone https://git.proxmox.com/git/pve-kernel.git
+
+      - name: Check latest commit for version bump
+        id: check
+        run: |
+          cd pve-kernel
+          commit_msg=$(git log -1 --pretty=%s)
+          echo "Commit message: $commit_msg"
+          if [[ "$commit_msg" =~ [bB]ump\ [vV]ersion ]]; then
+            version=$(echo "$commit_msg" | sed -n 's/.*bump version to \([0-9a-zA-Z\.\-]*\).*/\1/p' | tr -d '[:space:]')
+            if [ -z "$version" ]; then
+              version=$(echo "$commit_msg" | sed -n 's/.*bump version to \([0-9a-zA-Z\.\-]*\).*/\1/p' | tr -d '[:space:]')
+            fi
+            echo "Detected version: $version"
+            echo "version=$version" >> $GITHUB_OUTPUT
+            echo "bump_detected=true" >> $GITHUB_OUTPUT
+          else
+            echo "bump_detected=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check if release already exists
+        if: steps.check.outputs.bump_detected == 'true'
+        id: release_check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=${{ steps.check.outputs.version }}
+          if gh release view "pve-kernel-$version" >/dev/null 2>&1; then
+            echo "Release for $version already exists."
+            echo "release_exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "No release for $version found."
+            echo "release_exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Install build dependencies
+        if: steps.check.outputs.bump_detected == 'true' && steps.release_check.outputs.release_exists == 'false'
+        working-directory: pve-kernel
+        run: |
+          sudo mk-build-deps -i debian/control -t "apt-get -y --no-install-recommends"
+
+      - name: Initialize submodules and build
+        if: steps.check.outputs.bump_detected == 'true' && steps.release_check.outputs.release_exists == 'false'
+        working-directory: pve-kernel
+        run: |
+          make submodule
+          make -j$(nproc)
+
+      - name: Create GitHub Release
+        if: steps.check.outputs.bump_detected == 'true' && steps.release_check.outputs.release_exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=${{ steps.check.outputs.version }}
+          cd pve-kernel
+          gh release create "pve-kernel-$version" \
+            --title "Proxmox pve-kernel $version" \
+            --notes "Compiled from commit with bump version to $version" \
+            *.deb
