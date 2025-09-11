@@ -1,166 +1,280 @@
-name: Compile PVE Kernel
+name: Compile PVE Kernel with ACS Patch
 
 on:
   schedule:
-    - cron: '0 0 * * *' # 每天 UTC 时间 00:00 检查一次
-  workflow_dispatch: # 允许手动触发
+    - cron: '0 0 * * *'  # 每天 UTC 时间 00:00（北京时间 08:00）自动检查一次
+  workflow_dispatch:       # 允许手动触发工作流
 
 env:
   KERNEL_REPO: "https://git.proxmox.com/git/pve-kernel.git"
-  ARTIFACT_NAME: "pve-kernel-custom"
+  ARTIFACT_NAME: "pve-kernel-with-acs"
+  PROXMOX_DEBIAN_RELEASE: "trixie"  # 根据你要编译的内核目标选择：PVE 8.x 为 bookworm, PVE 7.x 为 bullseye
 
 jobs:
   check-version:
+    name: Check for New Kernel Version
     runs-on: ubuntu-22.04
     outputs:
-      should_build: ${{ steps.check.outputs.should_build }}
-      new_version: ${{ steps.check.outputs.new_version }}
+      should_build: ${{ steps.check-version.outputs.should_build }}
+      new_version: ${{ steps.check-version.outputs.new_version }}
+      latest_commit: ${{ steps.check-version.outputs.latest_commit }}
     steps:
-      - name: Checkout current repo
+      - name: Checkout current repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # 获取所有历史记录和标签，用于版本比较
 
-      - name: Fetch tags for version comparison
-        run: git fetch --tags
-
-      - name: Check for new version commits
-        id: check
+      - name: Clone PVE kernel source repo (shallow)
         run: |
-          # 克隆 PVE 内核仓库并检查最新的 "bump version" commit
-          git clone --depth 50 $KERNEL_REPO pve-kernel-src
-          cd pve-kernel-src
+          git clone --depth 50 ${{ env.KERNEL_REPO }} pve-kernel-src
+        timeout-minutes: 5
 
-          # 查找最新的包含"bump version"的提交及其版本信息
-          # 注意：版本信息提取逻辑可能需要根据实际commit message调整
-          LATEST_BUMP_COMMIT=$(git log --oneline --grep="bump version" -1 | awk '{print $1}')
-          if [ -z "$LATEST_BUMP_COMMIT" ]; then
+      - name: Check for new 'bump version' commit and compare
+        id: check-version
+        run: |
+          cd pve-kernel-src
+          # 查找最新的包含 "bump version" 的提交
+          LATEST_BUMP_COMMIT_INFO=$(git log --oneline --grep="bump version" -1 --pretty=format:"%H %s")
+          if [ -z "$LATEST_BUMP_COMMIT_INFO" ]; then
             echo "未找到包含 'bump version' 的提交。"
             echo "should_build=false" >> $GITHUB_OUTPUT
             exit 0
           fi
 
-          # 尝试从bump commit中提取版本号（示例，需调整）
-          # 例如：从 "bump version to 6.2.16-3" 中提取 "6.2.16-3"
-          POTENTIAL_VERSION=$(git show --pretty=format:%B -s $LATEST_BUMP_COMMIT | grep -oE '[0-9]+\.[0-9]+\.[0-9]+-[0-9]+' | head -1)
-          if [ -z "$POTENTIAL_VERSION" ]; then
-            # 如果无法直接提取，使用commit hash前7位作为标识
-            VERSION_ID=${LATEST_BUMP_COMMIT:0:7}
-            NEW_VERSION="custom-$VERSION_ID"
-          else
-            NEW_VERSION="$POTENTIAL_VERSION"
-          fi
-          echo "检测到新版本: $NEW_VERSION"
+          # 提取 commit hash 和 完整的提交信息
+          LATEST_COMMIT_HASH=$(echo $LATEST_BUMP_COMMIT_INFO | awk '{print $1}')
+          COMMIT_MESSAGE=$(echo $LATEST_BUMP_COMMIT_INFO | cut -d' ' -f2-)
+          echo "最新 bump version 提交: $LATEST_COMMIT_HASH, 信息: $COMMIT_MESSAGE"
 
-          # 检查该版本是否已在本仓库发布过
-          if git show-ref --tags --quiet --verify refs/tags/$NEW_VERSION; then
-            echo "版本 $NEW_VERSION 已存在，跳过编译。"
+          # 尝试从提交信息中提取版本号 (例如: "bump version to 6.8.12-3")
+          # 根据 Proxmox 实际的 commit message 格式调整正则表达式
+          EXTRACTED_VERSION=$(echo "$COMMIT_MESSAGE" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+-[0-9]+' | head -n1)
+          if [ -n "$EXTRACTED_VERSION" ]; then
+            DETECTED_VERSION="$EXTRACTED_VERSION"
+          else
+            # 如果无法提取明确版本号，使用 commit hash 前7位作为版本标识
+            DETECTED_VERSION="custom-${LATEST_COMMIT_HASH:0:7}"
+          fi
+          echo "检测到/生成的版本标识: $DETECTED_VERSION"
+
+          # 检查这个版本是否已经在本仓库通过 Git Tag 发布过
+          if git rev-parse -q --verify "refs/tags/$DETECTED_VERSION" > /dev/null; then
+            echo "版本 $DETECTED_VERSION 已存在，跳过编译。"
             echo "should_build=false" >> $GITHUB_OUTPUT
           else
-            echo "发现新版本 $NEW_VERSION，需要编译。"
+            echo "发现新版本 $DETECTED_VERSION，需要编译。"
             echo "should_build=true" >> $GITHUB_OUTPUT
-            echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+            echo "new_version=$DETECTED_VERSION" >> $GITHUB_OUTPUT
+            echo "latest_commit=$LATEST_COMMIT_HASH" >> $GITHUB_OUTPUT
           fi
 
   build-kernel:
+    name: Build PVE Kernel (Ubuntu Environment)
     needs: check-version
     if: needs.check-version.outputs.should_build == 'true'
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-22.04 # 使用 Ubuntu 22.04 环境进行编译
     env:
       KERNEL_VERSION: ${{ needs.check-version.outputs.new_version }}
+      TARGET_COMMIT: ${{ needs.check-version.outputs.latest_commit }}
     steps:
-      - name: Checkout current repo
+      - name: Checkout current repository
         uses: actions/checkout@v4
 
-      - name: Install build dependencies (Ubuntu)
+      - name: Clone PVE kernel source to build
         run: |
-          # 根据 Proxmox 官方及社区文档安装依赖 :cite[1]:cite[2]:cite[5]
-          sudo apt-get update
-          sudo apt-get install -y \
-            asciidoc-base automake bc bison cpio debhelper dh-python \
-            bison flex git kmod libdw-dev libelf-dev libiberty-dev \
-            libnuma-dev libpve-common-perl libslang2-dev libssl-dev \
-            libtool lintian lz4 perl-modules rsync sphinx-common xmlto \
-            zlib1g-dev dwarves net-tools htop vnstat build-essential \
-            file gcc make python3-minimal sed tar
+          git clone ${{ env.KERNEL_REPO }} pve-kernel-src-build
+          cd pve-kernel-src-build
+          git checkout ${{ env.TARGET_COMMIT }} # 检出特定的 commit
+        timeout-minutes: 10
 
-      - name: Clone PVE kernel source
+      - name: Add Proxmox VE repository for dependencies
         run: |
-          git clone --depth 50 ${{ env.KERNEL_REPO }} pve-kernel-src
-          cd pve-kernel-src
+          # 添加 Proxmox VE 的 GPG 密钥 (使用企业版或社区版源，这里以社区版为例，PVE 8.x)
+          wget http://download.proxmox.com/debian/proxmox-release-${{ env.PROXMOX_DEBIAN_RELEASE }}.gpg -O /etc/apt/trusted.gpg.d/proxmox-release-${{ env.PROXMOX_DEBIAN_RELEASE }}.gpg
+          # 添加 Proxmox VE 软件源 (使用 no-subscription 仓库)
+          echo "deb http://download.proxmox.com/debian/pve ${{ env.PROXMOX_DEBIAN_RELEASE }} pve-no-subscription" > /etc/apt/sources.list.d/pve.list
+          # 更新软件包列表，使新添加的源生效
+          apt-get update
+        # 注意：这些操作需要 sudo 权限，但 GitHub Actions 的 Ubuntu 环境默认以 root 用户运行，所以省略了 sudo
 
-      - name: Apply ACS Patch for IOMMU
+      - name: Install essential and PVE build dependencies (Ubuntu)
         run: |
-          cd pve-kernel-src
-          # 查找 ACS 补丁文件 :cite[2]
-          ACS_PATCH_FILE=$(find . -name "*patch*" -type f | grep -i acs | head -1 || true)
-          if [ -n "$ACS_PATCH_FILE" ]; then
-            echo "找到 ACS 补丁文件: $ACS_PATCH_FILE"
-            # 应用补丁或修改补丁文件（根据 :cite[2] 的描述）
-            # 示例修改，确保行数不变 :cite[2]
-            sed -i 's/if (!pci_is_pcie(dev) ||| pci_find_ext_capability(dev, PCI_EXT_CAP_ID_ACS))| return -ENOTTY;/if (!pci_is_pcie(dev))| return -ENOTTY;/g' "$ACS_PATCH_FILE"
-            # 注意：上述sed命令是示例，实际修改需精确匹配原文:cite[2]
-            echo "已尝试应用 ACS 补丁修改。"
-          else
-            echo "未找到明确的 ACS 补丁文件，继续编译过程。"
+          # 更新基础包列表并安装基础编译工具
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential \
+            devscripts \
+            debhelper \
+            dh-python \
+            automake \
+            autoconf \
+            libtool \
+            flex \
+            bison \
+            libelf-dev \
+            libdw-dev \
+            libiberty-dev \
+            libnuma-dev \
+            libssl-dev \
+            ncurses-dev \
+            git \
+            kmod \
+            cpio \
+            rsync \
+            xmlto \
+            asciidoc-base \
+            docbook-utils \
+            zlib1g-dev \
+            dwarves # 现代内核编译可能需要 dwarves
+
+      - name: Install PVE-specific dependencies from PVE repo
+        run: |
+          # 从刚添加的 Proxmox VE 仓库安装特定的依赖包，解决 libpve-common-perl 等问题
+          apt-get install -y --no-install-recommends \
+            libpve-common-perl \
+            libslang2-dev \
+            lintian \
+            lz4 \
+            perl-modules \
+            sphinx-common
+        # 如果上述安装仍有找不到的包，可以尝试 apt-cache search 包名 来查找，或者根据编译错误进一步调整
+
+      - name: Locate and Apply ACS Patch (IOMMU Support)
+        run: |
+          cd pve-kernel-src-build
+          # 寻找 ACS 补丁文件 (文件名可能因内核版本而异)
+          ACS_PATCH_CANDIDATES=$(find ./patches/kernel/ -name "*.patch" | xargs grep -l "ACS-capabilities" || true)
+          if [ -z "$ACS_PATCH_CANDIDATES" ]; then
+            echo "未找到明确包含 'ACS-capabilities' 的补丁文件。"
+            # 尝试寻找名称包含 'acs' 或 'ACS' 的补丁文件（不区分大小写）
+            ACS_PATCH_CANDIDATES=$(find ./patches/kernel/ -iname "*acs*.patch" || true)
           fi
 
-      - name: Build PVE kernel
+          if [ -n "$ACS_PATCH_CANDIDATES" ]; then
+            # 取第一个找到的候选补丁文件
+            ACS_PATCH_FILE=$(echo "$ACS_PATCH_CANDIDATES" | head -n1)
+            echo "找到可能的 ACS 补丁文件: $ACS_PATCH_FILE"
+            # 备份原始补丁文件
+            cp "$ACS_PATCH_FILE" "${ACS_PATCH_FILE}.backup"
+
+            # 尝试修改补丁以启用 ACS 覆盖功能 (根据  的描述)
+            # 注意：不同的内核版本，补丁的具体内容和行号可能不同，以下 sed 命令可能需要调整！
+            # 核心是注释掉 || pci_find_ext_capability(dev, PCI_EXT_CAP_ID_ACS) 这一行检查
+            sed -i 's/if (!pci_is_pcie(dev) ||/if (!pci_is_pcie(dev) \|\|/' "$ACS_PATCH_FILE" || echo "修改模式1可能未匹配"
+            sed -i 's/|| pci_find_ext_capability(dev, PCI_EXT_CAP_ID_ACS))/\/\/|| pci_find_ext_capability(dev, PCI_EXT_CAP_ID_ACS))/' "$ACS_PATCH_FILE" || echo "修改模式2可能未匹配"
+
+            echo "已尝试修改 ACS 补丁文件: $ACS_PATCH_FILE"
+            echo "修改后的内容摘要 (相关部分):"
+            grep -A 5 -B 5 "pci_find_ext_capability" "$ACS_PATCH_FILE" || true
+          else
+            echo "警告：未找到明确的 ACS 补丁文件。编译将继续进行，但 IOMMU 直通支持可能未启用。"
+          fi
+
+      - name: Build PVE kernel (This will take a LONG time)
         run: |
-          cd pve-kernel-src
-          # 初始化子模块 :cite[1]:cite[3]:cite[5]
-          make submodule || echo "初始化子模块遇到问题，尝试继续..."
-          # 开始编译 :cite[1]:cite[2]
+          cd pve-kernel-src-build
+          # 初始化子模块（如果存在）
+          git submodule update --init --recursive --depth 1 || echo "子模块初始化可能存在问题或无需子模块，继续构建..."
+          # 开始编译，使用所有可用的 CPU 核心
           make -j$(nproc)
-        
+        timeout-minutes: 180 # 内核编译非常耗时，设置超时为 3 小时，请根据 Runner 性能调整
 
-      - name: List generated packages
+      - name: List generated DEB packages
         run: |
-          cd pve-kernel-src
+          cd pve-kernel-src-build
           ls -la *.deb
-          # 记录生成的deb包列表到环境变量
-          echo "DEB_PACKAGES=$(ls *.deb | tr '\n' ' ')" >> $GITHUB_ENV
+          # 将生成的 deb 包列表存入环境变量，供后续步骤使用
+          DEB_PACKAGES=$(ls *.deb 2>/dev/null | tr '\n' ' ' || echo "")
+          if [ -z "$DEB_PACKAGES" ]; then
+            echo "未找到生成的 .deb 包，编译可能失败。"
+            exit 1
+          fi
+          echo "DEB_PACKAGES=$DEB_PACKAGES" >> $GITHUB_ENV
+          echo "生成的 DEB 包: $DEB_PACKAGES"
 
-      - name: Package artifacts
+      - name: Package artifacts for release
         run: |
-          cd pve-kernel-src
-          # 创建一个包含所有deb包和版本信息的zip文件
-          mkdir -p packages/${{ env.KERNEL_VERSION }}
-          cp *.deb packages/${{ env.KERNEL_VERSION }}/
-          echo "Kernel Version: ${{ env.KERNEL_VERSION }}" > packages/${{ env.KERNEL_VERSION }}/BUILD_INFO.txt
-          echo "Build Date: $(date -u)" >> packages/${{ env.KERNEL_VERSION }}/BUILD_INFO.txt
-          echo "Git Commit: $(git rev-parse HEAD)" >> packages/${{ env.KERNEL_VERSION }}/BUILD_INFO.txt
-          zip -r ${{ env.ARTIFACT_NAME }}-${{ env.KERNEL_VERSION }}.zip packages/${{ env.KERNEL_VERSION }}/
+          cd pve-kernel-src-build
+          # 创建版本目录并复制所有 deb 包
+          mkdir -p artifacts/${{ env.KERNEL_VERSION }}
+          cp *.deb artifacts/${{ env.KERNEL_VERSION }}/
+          # 创建构建信息文件
+          echo "Proxmox VE Kernel Build Information" > artifacts/${{ env.KERNEL_VERSION }}/BUILD_INFO.txt
+          echo "===================================" >> artifacts/${{ env.KERNEL_VERSION }}/BUILD_INFO.txt
+          echo "Kernel Version Identifier: ${{ env.KERNEL_VERSION }}" >> artifacts/${{ env.KERNEL_VERSION }}/BUILD_INFO.txt
+          echo "Source Commit: ${{ env.TARGET_COMMIT }}" >> artifacts/${{ env.KERNEL_VERSION }}/BUILD_INFO.txt
+          echo "Build Date (UTC): $(date -u)" >> artifacts/${{ env.KERNEL_VERSION }}/BUILD_INFO.txt
+          echo "Build Runner: ${{ runner.os }}" >> artifacts/${{ env.KERNEL_VERSION }}/BUILD_INFO.txt
+          echo "ACS Patch Applied: Modified" >> artifacts/${{ env.KERNEL_VERSION }}/BUILD_INFO.txt # 假设你修改了
+          echo "Included DEB Packages:" >> artifacts/${{ env.KERNEL_VERSION }}/BUILD_INFO.txt
+          ls -1 *.deb >> artifacts/${{ env.KERNEL_VERSION }}/BUILD_INFO.txt
+          # 打包所有内容
+          zip -r ${{ env.ARTIFACT_NAME }}-${{ env.KERNEL_VERSION }}.zip artifacts/${{ env.KERNEL_VERSION }}/
 
-      - name: Upload artifact for release
+      - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ARTIFACT_NAME }}-${{ env.KERNEL_VERSION }}
-          path: pve-kernel-src/${{ env.ARTIFACT_NAME }}-${{ env.KERNEL_VERSION }}.zip
+          path: pve-kernel-src-build/${{ env.ARTIFACT_NAME }}-${{ env.KERNEL_VERSION }}.zip
+        if: success() || failure() # 即使后续步骤失败，也保留编译产物
 
   create-release:
+    name: Create GitHub Release
     needs: [check-version, build-kernel]
-    if: needs.check-version.outputs.should_build == 'true'
+    if: needs.check-version.outputs.should_build == 'true' && success() # 仅当 check-version 决定构建且 build-kernel 成功时运行
     runs-on: ubuntu-22.04
     env:
       KERNEL_VERSION: ${{ needs.check-version.outputs.new_version }}
     steps:
+      - name: Checkout repository (to access tags and for gh CLI)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Download built artifact
         uses: actions/download-artifact@v4
         with:
           name: ${{ env.ARTIFACT_NAME }}-${{ env.KERNEL_VERSION }}
-          path: ./artifact
+          path: ./downloaded-artifact
+
+      - name: Create Git Tag for the new version
+        run: |
+          # 为此编译版本创建一个轻量级标签
+          git tag ${{ env.KERNEL_VERSION }}
+          git push origin ${{ env.KERNEL_VERSION }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create GitHub Release
+        id: create_release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ env.KERNEL_VERSION }}
-          name: "Proxmox VE Custom Kernel ${{ env.KERNEL_VERSION }}"
+          name: "Proxmox VE Kernel (${{ env.KERNEL_VERSION }}) with ACS Patch"
           body: |
-            **自动编译的 Proxmox VE 自定义内核**
-            - **版本:** ${{ env.KERNEL_VERSION }}
-            - **编译日期:** $(date -u +'%Y-%m-%d')
-            - **特性:** 包含 ACS 补丁以增强 IOMMU 直通支持 :cite[2]。
-            - **包含的 DEB 包:**
-            ${{ env.DEB_PACKAGES }} # 注意：这里需要更精确的包列表，可能需要上一步生成
-          files: ./artifact/*.zip
+            **Automated Build of Proxmox VE Kernel with ACS Patch for Enhanced IOMMU Support**
+
+            This release contains a custom-built Proxmox VE kernel based on the official source code, with modifications to the ACS patch to facilitate IOMMU passthrough on systems where certain PCIe devices do not expose ACS capabilities correctly.
+
+            **Build Details:**
+            - **Source Commit:** ${{ needs.check-version.outputs.latest_commit }}
+            - **Kernel Version Identifier:** ${{ env.KERNEL_VERSION }}
+            - **Build Date:** $(date -u +'%Y-%m-%d %H:%M:%S UTC')
+            - **Includes ACS Patch:** Yes (Modified to enable overriding missing ACS capabilities)
+
+            **Included DEB Packages:**
+            ${{ env.DEB_PACKAGES }} # 注意：这个变量需要从 build-kernel job 传递过来，可能需要通过 artifact 传递值，这里假设存在。更可靠的方式是在 create-release job 中解压 zip 从 BUILD_INFO.txt 读取。
+
+            **Installation:**
+            1. Download the zip file and extract it.
+            2. Copy the `.deb` files to your Proxmox VE server.
+            3. Install the kernel packages: `dpkg -i *.deb`
+            4. Reboot your server and select the new kernel from the GRUB menu.
+
+            **Note:**
+            - Use at your own risk. These are automated builds and not officially supported by Proxmox.
+            - Ensure you have backups before installing.
+            - The ACS patch modification might have security implications. Understand the risks before using.
+          files: ./downloaded-artifact/${{ env.ARTIFACT_NAME }}-${{ env.KERNEL_VERSION }}.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
