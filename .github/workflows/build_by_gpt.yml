@@ -2,7 +2,7 @@ name: Build PVE Kernel
 
 on:
   schedule:
-    - cron: '0 2 * * *'  # 每天 UTC 时间 02:00 触发
+    - cron: '0 2 * * *'  # 每天 UTC 02:00 触发
   workflow_dispatch:
 
 jobs:
@@ -33,26 +33,43 @@ jobs:
           echo "No 'bump version' commit found. Exiting."
           exit 0
 
-      - name: Set up Proxmox build container
-        uses: docker://proxmox/pve-kernel-builder:latest
-
-      - name: Build kernel
+      - name: Extract kernel version
+        id: extract_version
         run: |
-          cd /pve-kernel
-          make build-dir-fresh
-          make deb
+          cd pve-kernel
+          KERNEL_VERSION=$(head -n1 debian/changelog | awk '{print $2}' | sed 's/[()]//g')
+          echo "KERNEL_VERSION=$KERNEL_VERSION" >> $GITHUB_ENV
+          echo "kernel_version=$KERNEL_VERSION" >> $GITHUB_OUTPUT
+          echo "Detected kernel version: $KERNEL_VERSION"
 
-      - name: Create GitHub release
-        id: create_release
-        uses: ghcr.io/softprops/action-gh-release@v1
+      - name: Check if release already exists
+        id: check_release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "pve-kernel-${{ steps.extract_version.outputs.kernel_version }}" >/dev/null 2>&1; then
+            echo "already_exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "already_exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Skip if release exists
+        if: steps.check_release.outputs.already_exists == 'true'
+        run: |
+          echo "Release already exists. Skipping build."
+          exit 0
+
+      - name: Build kernel in Proxmox official container
+        uses: docker://proxmox/pve-kernel-builder:latest
         with:
-          files: |
-            /pve-kernel/*.deb
+          entrypoint: /bin/bash
+          args: -c "cd /pve-kernel && make build-dir-fresh && make deb"
+
+      - name: Create GitHub release and upload kernel
+        run: |
+          gh release create "pve-kernel-${{ steps.extract_version.outputs.kernel_version }}" \
+            /pve-kernel/*.deb \
+            --title "PVE Kernel ${{ steps.extract_version.outputs.kernel_version }}" \
+            --notes "Automatically built PVE kernel ${{ steps.extract_version.outputs.kernel_version }}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload kernel packages as release assets
-        run: |
-          gh release upload ${{ steps.create_release.outputs.tag }} \
-            /pve-kernel/*.deb \
-            --clobber
