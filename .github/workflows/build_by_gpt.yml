@@ -32,7 +32,16 @@ jobs:
             debhelper \
             dh-autoreconf \
             dh-python \
-            python3-sphinx
+            python3-sphinx \
+            asciidoc-base \
+            dwarves \
+            libdw-dev \
+            libelf-dev \
+            libiberty-dev \
+            libnuma-dev \
+            libslang2-dev \
+            xmlto
+
 
       - name: Clone Proxmox kernel repository
         run: |
