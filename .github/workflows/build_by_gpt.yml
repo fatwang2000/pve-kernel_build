@@ -10,8 +10,25 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout this repo
         uses: actions/checkout@v4
+
+      - name: Install base build tools
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            build-essential \
+            fakeroot \
+            devscripts \
+            libncurses5-dev \
+            libssl-dev \
+            bc \
+            kmod \
+            cpio \
+            git \
+            wget \
+            sudo \
+            lsb-release
 
       - name: Clone Proxmox kernel repository
         run: |
@@ -59,16 +76,15 @@ jobs:
           echo "Release already exists. Skipping build."
           exit 0
 
-      - name: Build kernel in Proxmox official container
-        uses: docker://proxmox/pve-kernel-builder:latest
-        with:
-          entrypoint: /bin/bash
-          args: -c "cd /pve-kernel && make build-dir-fresh && make deb"
+      - name: Build kernel using Proxmox build script
+        run: |
+          cd pve-kernel
+          sudo ./build.sh
 
       - name: Create GitHub release and upload kernel
         run: |
           gh release create "pve-kernel-${{ steps.extract_version.outputs.kernel_version }}" \
-            /pve-kernel/*.deb \
+            pve-kernel/*.deb \
             --title "PVE Kernel ${{ steps.extract_version.outputs.kernel_version }}" \
             --notes "Automatically built PVE kernel ${{ steps.extract_version.outputs.kernel_version }}"
         env:
