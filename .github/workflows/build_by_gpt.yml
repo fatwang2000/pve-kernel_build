@@ -43,7 +43,11 @@ jobs:
 
       - name: Install build dependencies
         run: |
+          # 启用 deb-src 源
+          sed -i 's/^# deb-src/deb-src/' /etc/apt/sources.list
+          apt-get update
           cd pve-kernel
+          # 自动安装构建依赖
           mk-build-deps -i debian/control -t "apt-get -y --no-install-recommends"
 
       - name: Check if release exists
