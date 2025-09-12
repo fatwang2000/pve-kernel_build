@@ -64,7 +64,8 @@ jobs:
           version=$(echo "$version_line" | cut -d' ' -f1)
           version_number=$(echo "$version_line" | awk -F'[()]' '{print $2}')
           distribution=$(echo "$version_line" | awk -F'[; ]' '{print $3}')
-          urgency=$(echo "$version_line" | awk -F'[; ]' '{print $5}')
+          # 提取紧急程度（只提取值，去掉"urgency="部分）
+          urgency=$(echo "$version_line" | grep -o 'urgency=[^,]*' | cut -d'=' -f2)
           
           # 提取变更内容 (所有以星号开头的行，直到维护者信息行)
           changes=$(grep -E "^\s*\*" latest_changes.txt | sed 's/^\s*\*\s*//')
