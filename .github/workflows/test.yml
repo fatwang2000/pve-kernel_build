@@ -1,0 +1,53 @@
+name: Build test
+
+on:
+  schedule:
+    - cron: '0 18 * * *'  # 每天 中国时间 02:00 触发
+  workflow_dispatch:
+
+env:
+  REPO_URL: https://git.proxmox.com/git/pve-kernel.git
+  REPO_BRANCH: master
+  CONFIG_FILE: .config
+  SCRIPTS_PATH: ${{ github.workspace }}/scripts
+  SSH_ACTIONS: false
+  UPLOAD_BIN_DIR: true
+  TZ: Asia/Shanghai
+  
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout this repo
+        uses: actions/checkout@v4
+
+      - name: Clone source code
+        run: git clone $REPO_URL -b $REPO_BRANCH pve-kernel
+      
+      - name: Fix ACS patch
+        run: |
+          cd pve-kernel
+          sudo chmod a+x $SCRIPTS_PATH/ACS_patch.sh  && $SCRIPTS_PATH/ACS_patch.sh
+      
+      - name: Fix DEBUG_INFO_BTF
+        run: |
+          cd pve-kernel
+          sed -i 's/${LINUX_TOOLS_DBG_DEB}/# ${LINUX_TOOLS_DBG_DEB}/' Makefile
+          
+      - name: Disable fwcheck
+        run: |
+          cd pve-kernel
+          sed -i "s/rules fwcheck abicheck/rules abicheck/" debian/rules
+
+      - name: Extract kernel version
+        id: extract_version
+        run: |
+          cd pve-kernel
+          KERNEL_VERSION=$(head -n1 debian/changelog | awk '{print $2}' | sed 's/[()]//g')
+          echo "KERNEL_VERSION=$KERNEL_VERSION" >> $GITHUB_ENV
+          echo "kernel_version=$KERNEL_VERSION" >> $GITHUB_OUTPUT
+          echo "Detected kernel version: $KERNEL_VERSION"
+          # 提取第一条 changelog（直到遇到空行停止）
+          awk 'NR>1 {print} /^$/{exit}' debian/changelog | sed '/^ -- /d' > changelog.txt
+          cat changelog.txt
