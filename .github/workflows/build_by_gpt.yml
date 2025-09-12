@@ -1,8 +1,8 @@
 name: Build PVE Kernel
 
 on:
-  schedule:
-    - cron: '0 2 * * *'  # 每天 UTC 02:00 触发
+  #schedule:
+  #  - cron: '0 2 * * *'  # 每天 UTC 02:00 触发
   workflow_dispatch:
 
 jobs:
