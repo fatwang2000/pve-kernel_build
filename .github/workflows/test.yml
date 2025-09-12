@@ -49,21 +49,15 @@ jobs:
           echo "kernel_version=$KERNEL_VERSION" >> $GITHUB_OUTPUT
           echo "Detected kernel version: $KERNEL_VERSION"
 
-
-      - name: Extract changelog
-        id: extract_changelog
+      - name: Generate release notes
         run: |
-          cd pve-kernel
-          # 提取变更内容（从第3行开始，直到空行），并替换 * 为 -（Markdown 列表）
-          sed -n '3,/^$/p' debian/changelog | sed '/^$/d' | sed 's/^ *//g; s/^\*/-/' > changelog.txt
-          
-          # 提取 maintainer 时间信息（第一条 "-- ..."）
-          maintainer_line=$(grep '^ -- ' debian/changelog | head -n1)
-          
-          echo "changelog<<EOF" >> $GITHUB_OUTPUT
-          cat changelog.txt >> $GITHUB_OUTPUT
-          echo "" >> $GITHUB_OUTPUT
-          echo "$maintainer_line" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-          cat changelog.txt
-          echo "$maintainer_line"
+          VERSION=$(head -n 1 pve-kernel/debian/changelog | xargs)
+          CHANGES=$(awk '/^\*/{print $0}' pve-kernel/debian/changelog | sed 's/^[[:space:]]*//;s/^\*/-/' )
+          MAINTAINER=$(tail -n 1 pve-kernel/debian/changelog | sed 's/^[[:space:]]*//;s/^--/---/')
+
+          echo "## $VERSION" > release_notes.md
+          echo "" >> release_notes.md
+          echo "$CHANGES" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "$MAINTAINER" >> release_notes.md
+          cat release_notes.md
