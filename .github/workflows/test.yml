@@ -56,8 +56,17 @@ jobs:
         id: extract_changelog
         run: |
           cd pve-kernel
-          # 提取第一条 changelog（从第2行开始，直到空行）
-          awk 'NR>1 {print} /^$/{exit}' debian/changelog | sed '/^ -- /d' > changelog.txt
+          # 提取变更内容（从第3行开始，直到空行），并替换 * 为 -（Markdown 列表）
+          sed -n '3,/^$/p' debian/changelog | sed '/^$/d' | sed 's/^ *//g; s/^\*/-/' > changelog.txt
+          
+          # 提取 maintainer 时间信息（第一条 "-- ..."）
+          maintainer_line=$(grep '^ -- ' debian/changelog | head -n1)
+          
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          cat changelog.txt >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "$maintainer_line" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
           cat changelog.txt
           echo "changelog<<EOF" >> $GITHUB_OUTPUT
           cat changelog.txt >> $GITHUB_OUTPUT
