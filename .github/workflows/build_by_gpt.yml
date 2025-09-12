@@ -102,6 +102,11 @@ jobs:
         run: |
           echo "Release already exists. Skipping build."
           exit 0
+          
+      - name: Disable fwcheck
+        run: |
+          cd pve-kernel
+          sed -i "s/rules fwcheck abicheck/rules abicheck/" debian/rules
 
       - name: Build PVE kernel
         run: |
