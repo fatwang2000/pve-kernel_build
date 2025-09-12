@@ -51,3 +51,14 @@ jobs:
           # 提取第一条 changelog（直到遇到空行停止）
           awk 'NR>1 {print} /^$/{exit}' debian/changelog | sed '/^ -- /d' > changelog.txt
           cat changelog.txt
+
+      - name: Extract changelog
+        id: extract_changelog
+        run: |
+          cd pve-kernel
+          # 提取第一条 changelog（从第2行开始，直到空行）
+          awk 'NR>1 {print} /^$/{exit}' debian/changelog | sed '/^ -- /d' > changelog.txt
+          cat changelog.txt
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          cat changelog.txt >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
