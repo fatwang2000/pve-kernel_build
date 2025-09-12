@@ -103,11 +103,10 @@ jobs:
           echo "编译成功，准备release文件..."
           sudo chmod a+w pve-kernel
           cd pve-kernel
-          mkdir release
-          cp *deb release/
+          mkdir -p release
+          # cp *deb release/
           zipname="pve-kernel-${{ steps.extract_version.outputs.kernel_version }}.zip"
-          cd release
-          zip -r9 $zipname *.deb
+          zip -r9 ./release/$zipname *.deb
           #cd pve-kernel
           #make
           echo "status=success" >> $GITHUB_OUTPUT
