@@ -106,6 +106,7 @@ jobs:
           mkdir release
           cp *deb release/
           zipname="pve-kernel-${{ steps.extract_version.outputs.kernel_version }}.zip"
+          cd release
           zip -r9 $zipname *.deb
           #cd pve-kernel
           #make
