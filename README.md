@@ -8,4 +8,4 @@ Linux Kernel for Proxmox projects
 
 # Thanks 
 
-参考了该项目的用docker环境进行编译的思路 **roforest/Actions-pve-kernel**: [https://github.com/dominicx/Actions-pve-kernel](https://github.com/roforest/Actions-pve-kernel)
+参考了该项目的用docker环境进行编译的思路 **roforest/Actions-pve-kernel**: https://github.com/dominicx/Actions-pve-kernel
