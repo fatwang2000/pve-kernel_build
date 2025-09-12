@@ -40,26 +40,7 @@ jobs:
           cd pve-kernel
           sed -i "s/rules fwcheck abicheck/rules abicheck/" debian/rules
 
-      - name: Check latest commit for version bump
-        id: check
-        run: |
-          cd pve-kernel
-          commit_msg=$(git log -1 --pretty=%s)
-          echo "Commit message: $commit_msg"
-          if [[ "$commit_msg" =~ [bB]ump\ [vV]ersion ]]; then
-            version=$(echo "$commit_msg" | sed -n 's/.*bump version to \([0-9a-zA-Z\.\-]*\).*/\1/p' | tr -d '[:space:]')
-            if [ -z "$version" ]; then
-              version=$(echo "$commit_msg" | sed -n 's/.*bump version to \([0-9a-zA-Z\.\-]*\).*/\1/p' | tr -d '[:space:]')
-            fi
-            echo "Detected version: $version"
-            echo "version=$version" >> $GITHUB_OUTPUT
-            echo "bump_detected=true" >> $GITHUB_OUTPUT
-          else
-            echo "bump_detected=false" >> $GITHUB_OUTPUT
-          fi
-          
       - name: Extract kernel version
-        if: steps.check.outputs.bump_detected == 'true'
         id: extract_version
         run: |
           cd pve-kernel
@@ -69,14 +50,15 @@ jobs:
           echo "Detected kernel version: $KERNEL_VERSION"
 
       - name: Check if release already exists
-        if: steps.check.outputs.bump_detected == 'true'
         id: check_release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if gh release view "pve-kernel-${{ steps.extract_version.outputs.kernel_version }}" >/dev/null 2>&1; then
+            echo "release is already exists"
             echo "already_exists=true" >> $GITHUB_OUTPUT
           else
+            echo "release is not exists“
             echo "already_exists=false" >> $GITHUB_OUTPUT
           fi
 
