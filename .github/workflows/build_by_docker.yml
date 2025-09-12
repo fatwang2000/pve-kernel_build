@@ -1,0 +1,135 @@
+name: Build PVE Kernel by Docker
+
+on:
+  schedule:
+    - cron: '0 2 * * *'  # 每天 UTC 02:00 触发
+  workflow_dispatch:
+
+env:
+  REPO_URL: https://git.proxmox.com/git/pve-kernel.git
+  REPO_BRANCH: master
+  CONFIG_FILE: .config
+  SCRIPTS_PATH: ${{ github.workspace }}/scripts
+  SSH_ACTIONS: false
+  UPLOAD_BIN_DIR: true
+  TZ: Asia/Shanghai
+  
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout this repo
+        uses: actions/checkout@v4
+
+      - name: Clone source code
+        run: git clone $REPO_URL -b $REPO_BRANCH pve-kernel
+      
+      - name: Fix ACS patch
+        run: |
+          cd pve-kernel
+          sudo chmod a+x $SCRIPTS_PATH/ACS_patch.sh  && $SCRIPTS_PATH/ACS_patch.sh
+      
+      - name: Fix DEBUG_INFO_BTF
+        run: |
+          cd pve-kernel
+          sed -i 's/${LINUX_TOOLS_DBG_DEB}/# ${LINUX_TOOLS_DBG_DEB}/' Makefile
+          
+      - name: Disable fwcheck
+        run: |
+          cd pve-kernel
+          sed -i "s/rules fwcheck abicheck/rules abicheck/" debian/rules
+            
+  
+      - name: Clone Proxmox kernel repository
+        run: |
+          git clone https://git.proxmox.com/git/pve-kernel.git
+
+      - name: Check for 'bump version' commit
+        id: check_commit
+        run: |
+          cd pve-kernel
+          LATEST_COMMIT_MSG=$(git log -1 --pretty=%s)
+          echo "LATEST_COMMIT_MSG=$LATEST_COMMIT_MSG" >> $GITHUB_ENV
+          echo "latest_commit_message=$LATEST_COMMIT_MSG" >> $GITHUB_OUTPUT
+
+      - name: Exit if no 'bump version' commit
+        if: contains(steps.check_commit.outputs.latest_commit_message, 'bump version') == false
+        run: |
+          echo "No 'bump version' commit found. Exiting."
+          exit 0
+
+      - name: Extract kernel version
+        id: extract_version
+        run: |
+          cd pve-kernel
+          KERNEL_VERSION=$(head -n1 debian/changelog | awk '{print $2}' | sed 's/[()]//g')
+          echo "KERNEL_VERSION=$KERNEL_VERSION" >> $GITHUB_ENV
+          echo "kernel_version=$KERNEL_VERSION" >> $GITHUB_OUTPUT
+          echo "Detected kernel version: $KERNEL_VERSION"
+
+      - name: Check if release already exists
+        id: check_release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "pve-kernel-${{ steps.extract_version.outputs.kernel_version }}" >/dev/null 2>&1; then
+            echo "already_exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "already_exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Skip if release exists
+        if: steps.check_release.outputs.already_exists == 'true'
+        run: |
+          echo "Release already exists. Skipping build."
+          exit 0
+          
+      - name: Freeing up disk space on CI system
+        run: |
+          dpkg-query -Wf '${Installed-Size}\t${Package}\n' | sort -n | tail -n 100
+          du -d 4 -ah / | sort -h | tail -n 100
+          df -h
+          sudo chmod a+x $SCRIPTS_PATH/free_disk.sh && sudo $SCRIPTS_PATH/free_disk.sh
+          df -h
+          
+      - name: Setting up Docker Environment
+        run: |
+          sudo apt-get install ca-certificates curl gnupg lsb-release
+          sudo mkdir -m 0755 -p /etc/apt/keyrings
+          curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+          sudo chmod a+r /etc/apt/keyrings/docker.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+          sudo apt-get update
+          sudo apt-get install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+      - name: Git submodule update
+        run: |
+          cd pve-kernel
+          git submodule update --init --recursive
+
+      - name: Compile the PVE kernel
+        id: compile
+        run: |
+          sudo chmod a+x $SCRIPTS_PATH/dockerun_trixie.sh
+          sudo docker run -v ${{ github.workspace }}:/home/build debian:trixie /home/build/scripts/dockerun_trixie.sh
+          #cd pve-kernel
+          #make
+          echo "status=success" >> $GITHUB_OUTPUT
+
+      - name: Create Release Directory
+        if: steps.compile.outputs.status == 'success' && env.UPLOAD_BIN_DIR == 'true'
+        run: |
+          sudo chmod a+w pve-kernel
+          cd pve-kernel
+          mkdir release
+          cp *deb release/
+        
+      - name: Create GitHub release and upload kernel
+        run: |
+          gh release create "pve-kernel-${{ steps.extract_version.outputs.kernel_version }}" \
+            pve-kernel/*.deb \
+            --title "PVE Kernel ${{ steps.extract_version.outputs.kernel_version }}" \
+            --notes "Automatically built PVE kernel ${{ steps.extract_version.outputs.kernel_version }}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
