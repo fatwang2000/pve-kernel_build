@@ -49,35 +49,27 @@ jobs:
           echo "kernel_version=$KERNEL_VERSION" >> $GITHUB_OUTPUT
           echo "Detected kernel version: $KERNEL_VERSION"
 
+        
       - name: Extract latest changelog entry
         id: extract-changelog
         run: |
-          # 提取最新版本信息
+          # 提取最新版本信息 (前10行通常包含一个完整的变更记录)
           head -n 10 pve-kernel/debian/changelog > latest_changes.txt
-          cat latest_changes.txt
           
           # 提取版本信息
           version_line=$(head -n 1 pve-kernel/debian/changelog)
           version=$(echo "$version_line" | cut -d' ' -f1)
-          echo "$version"
           version_number=$(echo "$version_line" | awk -F'[()]' '{print $2}')
-          echo "$version_number"
           distribution=$(echo "$version_line" | awk -F'[; ]' '{print $3}')
-          echo "$distribution"
           urgency=$(echo "$version_line" | awk -F'[; ]' '{print $5}')
-          echo "$urgency"
           
-          # 提取变更内容
-          changes=$(sed -n '2,9p' pve-kernel/debian/changelog | grep -E "^\s*\*" | sed 's/^\s*\*\s*//')
-          echo "$changes"
+          # 提取变更内容 (所有以星号开头的行)
+          changes=$(grep -E "^\s*\*" latest_changes.txt | sed 's/^\s*\*\s*//')
           
-          # 提取维护者信息
-          maintainer_info=$(tail -n 1 latest_changes.txt)
-          echo "$maintainer_info"
-          maintainer=$(echo "$maintainer_info" | cut -d' ' -f2-)
-          echo "$maintainer"
-          date=$(echo "$maintainer_info" | grep -Eo "[A-Za-z]{3}, [0-9]{1,2} [A-Za-z]{3} [0-9]{4} [0-9]{2}:[0-9]{2}:[0-9]{2} [+-][0-9]{4}")
-          echo "$date"
+          # 提取维护者信息 (以"-- "开头的行)
+          maintainer_line=$(grep -E "^ -- " latest_changes.txt)
+          maintainer=$(echo "$maintainer_line" | sed 's/^ -- //' | awk '{$NF=""; print $0}' | sed 's/[[:space:]]*$//')
+          date=$(echo "$maintainer_line" | grep -Eo "[A-Za-z]{3}, [0-9]{1,2} [A-Za-z]{3} [0-9]{4} [0-9]{2}:[0-9]{2}:[0-9]{2} [+-][0-9]{4}")
           
           # 设置输出变量
           echo "version=$version" >> $GITHUB_OUTPUT
