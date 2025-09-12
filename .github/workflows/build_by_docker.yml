@@ -2,7 +2,7 @@ name: Build PVE Kernel by Docker
 
 on:
   schedule:
-    - cron: '0 2 * * *'  # 每天 UTC 02:00 触发
+    - cron: '0 18 * * *'  # 每天 中国时间 02:00 触发
   workflow_dispatch:
 
 env:
