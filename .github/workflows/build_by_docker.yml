@@ -39,12 +39,7 @@ jobs:
         run: |
           cd pve-kernel
           sed -i "s/rules fwcheck abicheck/rules abicheck/" debian/rules
-            
-  
-      - name: Clone Proxmox kernel repository
-        run: |
-          git clone https://git.proxmox.com/git/pve-kernel.git
-
+ 
       - name: Check for 'bump version' commit
         id: check_commit
         run: |
