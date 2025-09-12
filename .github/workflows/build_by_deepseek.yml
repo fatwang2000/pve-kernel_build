@@ -1,8 +1,8 @@
 name: Compile PVE Kernel with ACS Patch
 
 on:
-  schedule:
-    - cron: '0 0 * * *'  # 每天 UTC 时间 00:00（北京时间 08:00）自动检查一次
+  #schedule:
+  #  - cron: '0 0 * * *'  # 每天 UTC 时间 00:00（北京时间 08:00）自动检查一次
   workflow_dispatch:       # 允许手动触发工作流
 
 env:
