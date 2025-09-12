@@ -58,7 +58,7 @@ jobs:
             echo "release is already exists"
             echo "already_exists=true" >> $GITHUB_OUTPUT
           else
-            echo "release is not exists“
+            echo "release is not exists"
             echo "already_exists=false" >> $GITHUB_OUTPUT
           fi
 
