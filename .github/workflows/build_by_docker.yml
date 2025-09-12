@@ -110,13 +110,74 @@ jobs:
           #cd pve-kernel
           #make
           echo "status=success" >> $GITHUB_OUTPUT
-
+          
+      - name: Extract latest changelog entry
+        if: steps.check_release.outputs.already_exists == 'false'
+        id: extract-changelog
+        run: |
+          # 提取第一个完整的变更记录（直到下一个版本行）
+          # 使用 awk 提取从开始到下一个版本行之前的内容
+          awk '
+          /^[a-zA-Z0-9].*\([0-9].*\)/ && NR > 1 {exit}  # 遇到下一个版本行时退出
+          {print}                                        # 打印当前行
+          ' pve-kernel/debian/changelog > latest_changes.txt
+          cat latest_changes.txt
+          # 提取版本信息
+          version_line=$(head -n 1 latest_changes.txt)
+          version=$(echo "$version_line" | cut -d' ' -f1)
+          version_number=$(echo "$version_line" | awk -F'[()]' '{print $2}')
+          distribution=$(echo "$version_line" | awk -F'[; ]' '{print $3}')
+          urgency=$(echo "$version_line" | awk -F'[; ]' '{print $5}')
+          
+          # 提取变更内容 (所有以星号开头的行，直到维护者信息行)
+          changes=$(grep -E "^\s*\*" latest_changes.txt | sed 's/^\s*\*\s*//')
+          
+          # 提取维护者信息 (以"-- "开头的行)
+          maintainer_line=$(grep -E "^ -- " latest_changes.txt)
+          # 提取维护者信息（去掉日期部分）
+          maintainer=$(echo "$maintainer_line" | sed 's/^ -- //' | sed 's/[[:space:]]*[A-Za-z][a-z][a-z],.*$//')
+          # 提取日期部分
+          date=$(echo "$maintainer_line" | grep -Eo "[A-Za-z]{3}, [0-9]{1,2} [A-Za-z]{3} [0-9]{4} [0-9]{2}:[0-9]{2}:[0-9]{2} [+-][0-9]{4}")
+          
+          # 设置输出变量
+          echo "version=$version" >> $GITHUB_OUTPUT
+          echo "version_number=$version_number" >> $GITHUB_OUTPUT
+          echo "distribution=$distribution" >> $GITHUB_OUTPUT
+          echo "urgency=$urgency" >> $GITHUB_OUTPUT
+          echo "changes<<EOF" >> $GITHUB_OUTPUT
+          echo "$changes" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          echo "maintainer=$maintainer" >> $GITHUB_OUTPUT
+          echo "date=$date" >> $GITHUB_OUTPUT
+          
+      - name: Generate release notes
+        if: steps.check_release.outputs.already_exists == 'false'
+        run: |
+          cat > release_note.MD << EOF
+          ## ${{ steps.extract-changelog.outputs.version }} (${{ steps.extract-changelog.outputs.version_number }})
+          
+          ### 定制化信息
+          Fix ACS patch
+          Fix DEBUG_INFO_BTF
+          Disable fwcheck
+          
+          ### 变更详情
+          ${{ steps.extract-changelog.outputs.changes }}
+          
+          ### 发布信息
+          - **发布版本**: ${{ steps.extract-changelog.outputs.version_number }}
+          - **目标发行版**: ${{ steps.extract-changelog.outputs.distribution }}
+          - **紧急程度**: ${{ steps.extract-changelog.outputs.urgency }}
+          - **维护团队**: ${{ steps.extract-changelog.outputs.maintainer }}
+          - **发布时间**: ${{ steps.extract-changelog.outputs.date }}
+          EOF
+          
       - name: Create GitHub release and upload kernel
         if: steps.compile.outputs.status == 'success' && env.UPLOAD_BIN_DIR == 'true' && steps.check_release.outputs.already_exists == 'false'
         run: |
           gh release create "pve-kernel-${{ steps.extract_version.outputs.kernel_version }}" \
             pve-kernel/release/*.zip \
             --title "PVE Kernel ${{ steps.extract_version.outputs.kernel_version }}" \
-            --notes "Automatically built PVE kernel ${{ steps.extract_version.outputs.kernel_version }}"
+            --notes-file release_note.MD
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
