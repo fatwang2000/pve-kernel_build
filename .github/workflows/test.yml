@@ -48,9 +48,7 @@ jobs:
           echo "KERNEL_VERSION=$KERNEL_VERSION" >> $GITHUB_ENV
           echo "kernel_version=$KERNEL_VERSION" >> $GITHUB_OUTPUT
           echo "Detected kernel version: $KERNEL_VERSION"
-          # 提取第一条 changelog（直到遇到空行停止）
-          awk 'NR>1 {print} /^$/{exit}' debian/changelog | sed '/^ -- /d' > changelog.txt
-          cat changelog.txt
+
 
       - name: Extract changelog
         id: extract_changelog
@@ -68,6 +66,4 @@ jobs:
           echo "$maintainer_line" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
           cat changelog.txt
-          echo "changelog<<EOF" >> $GITHUB_OUTPUT
-          cat changelog.txt >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          echo "$maintainer_line"
