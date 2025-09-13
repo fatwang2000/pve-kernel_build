@@ -167,7 +167,7 @@ jobs:
           
           ### 发布信息
           - **发布版本**: ${{ steps.extract-changelog.outputs.version_number }}
-          - **Debian发行版**: ${{ steps.extract-changelog.outputs.distribution }}
+          - **Debian版本**: ${{ steps.extract-changelog.outputs.distribution }}
           - **紧急程度**: ${{ steps.extract-changelog.outputs.urgency }}
           - **维护团队**: ${{ steps.extract-changelog.outputs.maintainer }}
           - **发布时间**: ${{ steps.extract-changelog.outputs.date }}
