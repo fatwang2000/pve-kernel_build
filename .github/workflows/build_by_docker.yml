@@ -17,13 +17,20 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
-
+    name: Build on ${{ matrix.branch }}
+    strategy:
+      matrix:
+        # 在这里定义你的矩阵维度：分支列表
+        branch: [master, trixie-6.14]
+      # 当矩阵中某一个任务失败时，不取消其他正在运行的任务 :cite[6]
+      fail-fast: false
+      
     steps:
       - name: Checkout this repo
         uses: actions/checkout@v4
 
       - name: Clone source code
-        run: git clone $REPO_URL -b $REPO_BRANCH pve-kernel
+        run: git clone $REPO_URL -b ${{ matrix.branch }} pve-kernel
       
       - name: Fix ACS patch
         run: |
