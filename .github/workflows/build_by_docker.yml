@@ -7,7 +7,7 @@ on:
 
 env:
   REPO_URL: https://git.proxmox.com/git/pve-kernel.git
-  REPO_BRANCH: master
+  REPO_BRANCH: trixie-6.14
   CONFIG_FILE: .config
   SCRIPTS_PATH: ${{ github.workspace }}/scripts
   SSH_ACTIONS: false
