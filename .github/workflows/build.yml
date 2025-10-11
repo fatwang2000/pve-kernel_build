@@ -34,7 +34,7 @@ jobs:
           sudo apt update
 
       - name: Clone pve-kernel repository
-        run: git clone https://git.proxmox.com/git/pve-kernel.git
+        run: git clone -b trixie-6.14 https://git.proxmox.com/git/pve-kernel.git
 
       - name: Check latest commit for version bump
         id: check
