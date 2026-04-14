@@ -7,7 +7,7 @@ on:
 
 env:
   REPO_URL: https://git.proxmox.com/git/pve-kernel.git
-  REPO_BRANCH: trixie-6.14
+  REPO_BRANCH: trixie-6.17
   CONFIG_FILE: .config
   SCRIPTS_PATH: ${{ github.workspace }}/scripts
   SSH_ACTIONS: false
@@ -21,7 +21,7 @@ jobs:
     strategy:
       matrix:
         # 在这里定义你的矩阵维度：分支列表
-        branch: [master, trixie-6.14]
+        branch: [master, trixie-6.17, trixie-6.14]
       # 当矩阵中某一个任务失败时，不取消其他正在运行的任务 :cite[6]
       fail-fast: false
       
