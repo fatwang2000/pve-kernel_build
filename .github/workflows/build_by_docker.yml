@@ -27,7 +27,7 @@ jobs:
       
     steps:
       - name: Checkout this repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@main
 
       - name: Clone source code
         run: git clone $REPO_URL -b ${{ matrix.branch }} pve-kernel
