@@ -16,4 +16,4 @@ apt-get install -y bindgen rustc rust-src rustfmt rust-clippy
 df -h
 useradd build -d /home/build/pve-kernel
 chown -R build /home/build/pve-kernel
-su - build -c "make"
+su - build -c "make -j1"
